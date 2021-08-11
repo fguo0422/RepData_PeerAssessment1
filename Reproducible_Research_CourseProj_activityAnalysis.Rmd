@@ -1,0 +1,136 @@
+---
+title: "ReprodResearch_CourseProj_ActivityAnalysis"
+author: "Fang Guo"
+date: "August 5, 2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+##Introduction
+
+It is now possible to collect a large amount of data about personal movement using activity monitoring devices such as a Fitbit, Nike Fuelband, or Jawbone Up. These type of devices are part of the “quantified self” movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. But these data remain under-utilized both because the raw data are hard to obtain and there is a lack of statistical methods and software for processing and interpreting the data.
+
+This assignment makes use of data from a personal activity monitoring device. This device collects data at 5 minute intervals through out the day. The data consists of two months of data from an anonymous individual collected during the months of October and November, 2012 and include the number of steps taken in 5 minute intervals each day.
+
+##Datasets
+Downloaded from [course website](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip) 
+
+The variables included in this dataset are:
+
+- steps: Number of steps taking in a 5-minute interval (missing values are coded as \color{red}{\verb|NA|}NA)
+- date: The date on which the measurement was taken in YYYY-MM-DD format
+- interval: Identifier for the 5-minute interval in which measurement was taken
+The dataset is stored in a comma-separated-value (CSV) file and there are a total of 17,568 observations in this dataset.
+
+```{r,setup,include=FALSE }
+knitr::opts_knit$set(root.dir="H:/Trainings/coursera/DataScience_2021/ReproducibleResearch/Data/repdata_data_activity")
+```
+
+
+### load libraries 
+```{r echo=FALSE}
+library(ggplot2)
+library(dplyr)
+library(naniar)
+```
+
+### read in dataset
+```{r echo='TRUE'}
+activity <- read.table("activity.csv", header=T, quote="\"",sep=",")
+activity$date <- as.Date(activity$date, format ="%Y-%m-%d" )
+dim(activity)
+summary(activity)
+```
+
+### Histogram of the total number of steps taken each day
+```{r echo=TRUE}
+steps_daily <- aggregate(steps ~date,data=activity,sum,na.action=na.omit)
+ggplot(data = steps_daily,mapping = aes(steps))+geom_histogram(binwidth = 1000,color="white")+labs(y="# o Days" )+labs(x='Daily Steps')+theme_bw() + ylim(c(0,10))
+```
+
+### Mean and median number of steps taken each day
+```{r echo=TRUE}
+#Average and median daily steps 
+steps_mean <- mean(steps_daily$steps)
+steps_median <- median(steps_daily$steps)
+print(paste("Average daily steps: ", steps_mean))
+print(paste("median daily steps: ", steps_median))
+
+#Time series plot of the average number of steps taken
+steps_mean <- aggregate(steps ~date,data=activity,mean,na.action=na.omit)
+head(steps_mean)
+#Time series plot of the average number of steps taken
+ggplot(data = steps_mean,mapping = aes(date,steps))+geom_point()+labs(y="Average Daily Steps" )+labs(x='Date')+theme_bw() 
+
+```
+
+### The 5-minute interval that, on average, contains the maximum number of steps
+``` {r echo=TRUE}
+interval_means <- aggregate(steps ~ interval, data=activity, mean, na.action=na.omit)
+
+interval_maxsteps<-interval_means[with(interval_means,order(steps,decreasing = TRUE)),]
+
+print(paste('Interval contains the max number of steps is interval  ',interval_maxsteps[1,'interval'], 'with average steps ',interval_maxsteps[1,'steps']  ))
+```
+
+### Code to describe and show a strategy for imputing missing data
+1. Distribution of issing values for each variable. As the graph shows only variable steps has 13.11% of missing
+values. Date and Interval have no missing values
+```{r echo=TRUE}
+#vis_miss(activity)
+gg_miss_var(activity)
+```
+#### Dates with missing steps: 8 dates in total
+```{r echo=TRUE}
+gg_miss_var(activity,facet=date)
+#gg_miss_var(activity,facet=interval)
+ggplot(activity, aes(x = date, y = steps)) + geom_miss_point()
+activity %>% select(date,steps) %>% group_by(date) %>% miss_var_summary() %>% filter(n_miss>0)
+```
+
+#### intervals with missing steps: consistent 8 missing on each interval due to 100% missing steps for 8 dates
+```{r echo=TRUE}
+ggplot(activity, aes(x = interval, y = steps)) + geom_miss_point()
+activity %>% select(interval,steps) %>% group_by(interval) %>% miss_var_summary() %>% filter(n_miss>0)
+```
+#### Missing values analysis indicates 100% missing on 8 dates. For imputation we would use average steps 
+#### from each interval for those 8 dates
+``` {r echo=TRUE}
+interval_mean <- activity [!is.na(activity$steps),c('interval','steps')] %>% group_by(interval) %>% summarise(steps=mean(steps)) %>% ungroup()
+
+imputed_dates_mssteps0 <- merge(activity[is.na(activity$steps),c('interval','date')],interval_mean,by='interval')
+imputed_dates_mssteps <-imputed_dates_mssteps0 %>% arrange(date,interval)
+
+activity_imp <- rbind(activity [!is.na(activity$steps),],imputed_dates_mssteps) %>% arrange(date,interval)
+dim(activity)
+dim(activity_imp)
+```
+ 
+### Histogram of the total number of steps taken each day after missing values are imputed
+```{r echo=TRUE}
+steps_daily_imp <- aggregate(steps ~date,data=activity_imp,sum,na.action=na.omit)
+steps_daily_imp$flag <- 'IMPUTED MISSING STEPS WITH AVG'
+steps_daily$flag <- 'REMOVED MISSING STEPS '
+
+steps_daily_two <- rbind(steps_daily_imp,steps_daily)
+qplot(steps,data=steps_daily_two,fill=flag)
+
+```
+
+### Panel plot comparing the average number of steps taken per 5-minute interval across weekdays and weekends
+```{r echo=TRUE}
+# Calculate weekday
+activity_imp$weekday <- weekdays(activity_imp$date,abbreviate = TRUE)
+#activity_imp %>% arrange(desc(steps))
+
+#activity$weekday <- if_else(activity$weekday %in% c('Sat','Sun'),'WEEKEND','WEEKDAY')
+
+weekday_avg<-activity_imp %>% group_by(date,weekday) %>% summarize(avg_steps=mean(steps)) %>% ungroup()
+
+with(weekday_avg,ggplot(data = weekday_avg[!is.na(avg_steps),], aes(weekday,avg_steps))+geom_boxplot()
+     +labs(y="Average Steps" )+labs(x='weekday')+theme_bw() + labs(title = 'Average Steps by weekday')
+     )
+
+```
+
